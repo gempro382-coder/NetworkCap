@@ -1,0 +1,80 @@
+{
+  "name": "networkcap",
+  "productName": "NetworkCap",
+  "version": "5.0.0",
+  "description": "NetworkCap v5.0 — Groq Whisper STT + 3-tier LLM routing (Groq Fast tiers + Gemini for hard questions) cloud interview assistant. No local STT or LLM models.",
+  "main": "src/main.js",
+  "author": {
+    "name": "Aashish",
+    "email": "aashish@aashi.ai",
+    "url": "https://aashi.ai"
+  },
+  "license": "MIT",
+  "homepage": "https://aashi.ai",
+  "bin": {
+    "networkcap": "bin/networkcap.js"
+  },
+  "dependencies": {
+    "@google/genai": "^2.16.0",
+    "koffi": "^2.14.1"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/functional.test.js",
+    "build:win": "node bin/build-win.js",
+    "dist:win": "node bin/build-win.js --publish never",
+    "test:load": "node tests/module_load.test.js"
+  },
+  "devDependencies": {
+    "electron": "43.3.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.networkcap.app",
+    "productName": "NetworkCap",
+    "copyright": "Copyright © 2026 Aashish",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/koffi/**/*"
+    ],
+    "compression": "maximum",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "src/**/*",
+      "bin/**/*",
+      "package.json",
+      "!node_modules/koffi/src/**",
+      "!node_modules/koffi/vendor/**",
+      "!node_modules/koffi/doc/**",
+      "!node_modules/koffi/build/koffi/{darwin_*,freebsd_*,linux_*,musl_*,openbsd_*,win32_arm64,win32_ia32}/**",
+      "!node_modules/koffi/build/koffi/win32_x64/*.{exp,lib}",
+      "!node_modules/koffi/{CHANGELOG.md,README.md,index.d.ts,indirect.js}",
+      "!**/__pycache__/**",
+      "!**/*.pyc",
+      "!release/**"
+    ],
+    "afterPack": "packaging-hooks/afterPack.js",
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/blank.ico",
+      "requestedExecutionLevel": "asInvoker",
+      "artifactName": "NetworkCap.exe",
+      "executableName": "NetworkCap"
+    },
+    "portable": {
+      "artifactName": "NetworkCap.exe",
+      "unicode": true,
+      "useZip": false
+    }
+  }
+}

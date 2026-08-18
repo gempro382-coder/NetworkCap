@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'; media-src 'self' blob:;">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NetworkCap</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="startupView" class="startup-view" aria-label="NetworkCap setup" tabindex="0">
+    <header class="brand-row">
+      <div class="brand-mark" aria-hidden="true">A</div>
+      <div>
+        <h1>NetworkCap</h1>
+        <p>Low-latency Gemini workspace</p>
+      </div>
+      <span class="visible-badge" title="NetworkCap remains visible in Windows Task Manager">Visible app</span>
+    </header>
+
+    <section class="hero-copy">
+      <h2>Prepare, reason, and review — cloud AI, zero local models.</h2>
+      <p>Voice transcription runs on Groq Whisper; answers are routed through a 3-tier classifier (Groq Fast tiers + Gemini for hard questions). Enter both API keys to begin.</p>
+    </section>
+
+    <section class="setup-grid">
+      <label class="field field-wide">
+        <span>Groq API key (STT + Tier 1/2 LLM)</span>
+        <div class="key-row">
+          <input id="groqKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Groq API key">
+          <button id="toggleGroqBtn" class="icon-btn" type="button" title="Show or hide key">Show</button>
+        </div>
+        <small>Used for Whisper STT and the Fast LLM tiers. Stored locally in <code>~/.aashi/config.json</code>.</small>
+      </label>
+      <label class="field field-wide">
+        <span>Gemini API key (Tier 3 hard + fallback)</span>
+        <div class="key-row">
+          <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Google AI Studio API key">
+          <button id="toggleKeyBtn" class="icon-btn" type="button" title="Show or hide key">Show</button>
+        </div>
+        <small>Used for hard questions and the Tier 1 fallback. Stored locally, never rendered in full.</small>
+      </label>
+      <label class="field">
+        <span>Answer mode</span>
+        <select id="qualityMode">
+          <option value="instant" selected>Instant — minimum latency</option>
+          <option value="fast">Fast — balanced live stream</option>
+          <option value="verified">Verified — slower two-pass</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Gemini model</span>
+        <select id="modelSelectBoot" aria-label="Gemini model"></select>
+        <small>Flash-Lite is fastest; Pro prioritizes depth.</small>
+      </label>
+      <label class="field">
+        <span>Default skill</span>
+        <select id="skillSelectBoot">
+          <option value="interview">Interview practice</option>
+          <option value="coding">Coding</option>
+          <option value="general">General</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Screenshot mode</span>
+        <select id="screenshotModeBoot">
+          <option value="normal">Normal — ultra-fast, full screen, highest quality</option>
+        </select>
+        <small>Single mode: captures the full screen at full resolution, very fast.</small>
+      </label>
+    </section>
+
+    <section class="status-card" aria-live="polite">
+      <div class="status-title"><span id="healthDot" class="health-dot"></span><strong>Environment</strong><button id="verifyBtn" type="button" class="text-btn">Run checks</button></div>
+      <div id="bootSteps" class="boot-steps"><p class="muted">Run checks to verify Groq STT, Gemini, and audio devices.</p></div>
+      <div id="bootLog" class="boot-log" aria-label="Setup log"></div>
+    </section>
+
+    <section class="mic-test-panel">
+      <div>
+        <strong>Microphone test</strong>
+        <span id="micTestText">Measures real input and verifies transcription.</span>
+      </div>
+      <div class="meters">
+        <span title="Interviewer audio"><i id="meterInterviewer"></i></span>
+        <span title="Your microphone"><i id="meterUser"></i></span>
+      </div>
+      <button id="micTestBtn" class="secondary-btn" type="button">Test 3s</button>
+    </section>
+
+    <section id="setupTerminalPanel" class="terminal-panel setup-terminal" style="display:flex; height:190px; margin-top:12px;">
+      <div class="panel-toolbar">
+        <div><span class="answer-state" id="setupTerminalState">Setup Terminal — Groq STT + 3-tier LLM router live</span><span id="setupTerminalMeta"></span></div>
+        <div class="panel-actions">
+          <button id="setupTerminalClearBtn" type="button">Clear</button>
+          <button id="setupTerminalCloseBtn" type="button" title="Close terminal">×</button>
+        </div>
+      </div>
+      <div id="setupTerminalOut" class="terminal-out" tabindex="0" aria-label="Setup terminal output"></div>
+      <div class="terminal-input-row">
+        <span class="terminal-prompt">›</span>
+        <input id="setupTerminalInput" class="terminal-input" type="text" autocomplete="off" spellcheck="false" placeholder="Type a command (uses app privileges)…">
+      </div>
+    </section>
+
+    <footer class="startup-actions">
+      <span id="startupStatus">Ready for setup</span>
+      <button id="setupTerminalToggleBtn" type="button" class="secondary-btn" title="Toggle setup terminal">Terminal</button>
+      <button id="startButton" class="primary-btn" type="button">Start NetworkCap</button>
+    </footer>
+  </main>
+
+  <section id="workspace" class="workspace" aria-label="NetworkCap workspace">
+    <div class="command-tab">
+      <button id="recordButton" class="command-button record" type="button" title="Start microphone (Ctrl+Shift+V)" aria-label="Start microphone" aria-pressed="false"><span class="mic-glyph" aria-hidden="true">🎙</span></button>
+      <button id="askToggle" class="command-button word" type="button">Ask</button>
+      <select id="skillSelect" class="skill-select" aria-label="Answer skill">
+        <option value="interview">Interview</option>
+        <option value="coding">Coding</option>
+        <option value="general">General</option>
+      </select>
+      <div class="command-spacer"></div>
+      <button id="stageButton" class="command-button" type="button" title="Stage screenshot (Ctrl+Shift+S)">▧<b id="stagedBadge">0</b></button>
+      <button id="sendStagedButton" class="command-button" type="button" title="Send staged screenshots">↗</button>
+      <button id="stopAIButton" class="command-button stop" type="button" title="Stop AI (Ctrl+Shift+K)">■</button>
+      <button id="shortcutsHelpButton" class="command-button help-circle" type="button" title="Shortcuts (Ctrl+Shift+L) — Hover to show all">?</button>
+      <button id="settingsButton" class="command-button" type="button" title="Settings">⚙</button>
+      <button id="usageButton" class="command-button" type="button" title="Usage trackers">📊</button>
+      <button id="closeButton" class="command-button close" type="button" title="Quit NetworkCap">×</button>
+    </div>
+
+    <div id="askBox" class="ask-box">
+      <textarea id="askInput" rows="2" maxlength="24000" placeholder="Ask a question… Enter to send · Shift+Enter for newline"></textarea>
+      <button id="sendButton" type="button" aria-label="Send question">Send</button>
+    </div>
+
+    <div id="terminalPanel" class="terminal-panel">
+      <div class="panel-toolbar">
+        <div><span class="answer-state" id="terminalState">Terminal</span><span id="terminalMeta"></span></div>
+        <div class="panel-actions">
+          <button id="terminalKillBtn" type="button" title="Stop the running command">Stop</button>
+          <button id="terminalClearBtn" type="button">Clear</button>
+          <button id="terminalCloseBtn" type="button" title="Close terminal">×</button>
+        </div>
+      </div>
+      <div id="terminalOut" class="terminal-out" tabindex="0" aria-label="Terminal output"></div>
+      <div class="terminal-input-row">
+        <span class="terminal-prompt" id="terminalPrompt">›</span>
+        <input id="terminalInput" class="terminal-input" type="text" autocomplete="off" spellcheck="false" placeholder="Run a command… (uses app privileges)">
+      </div>
+    </div>
+
+    <div id="answerPanel" class="answer-panel">
+      <div class="panel-toolbar">
+        <div><span id="answerState" class="answer-state">Ready</span><span id="responseMeta"></span></div>
+        <div class="panel-actions">
+          <span class="scroll-hint">Ctrl + arrows</span>
+          <span class="scroll-controls" role="group" aria-label="Scroll answer">
+            <button id="scrollLeftBtn" type="button" title="Scroll visible code left (Ctrl+Left)" aria-label="Scroll visible code left">←</button>
+            <button id="scrollUpBtn" type="button" title="Scroll answer up (Ctrl+Up)" aria-label="Scroll answer up">↑</button>
+            <button id="scrollDownBtn" type="button" title="Scroll answer down (Ctrl+Down)" aria-label="Scroll answer down">↓</button>
+            <button id="scrollRightBtn" type="button" title="Scroll visible code right (Ctrl+Right)" aria-label="Scroll visible code right">→</button>
+          </span>
+          <button id="copyAnswerBtn" type="button">Copy</button>
+          <button id="clearChatBtn" type="button">Clear</button>
+          <button id="closeAnswerBtn" type="button" title="Close response overlay (Ctrl+Shift+O)" class="close-overlay-btn">×</button>
+        </div>
+      </div>
+      <div id="liveTranscript" class="live-transcript" aria-live="polite"></div>
+      <div id="chatScroll" class="chat-scroll" tabindex="0" aria-label="Conversation. Use Control plus arrow keys to scroll vertically or through wide code.">
+        <div id="chatMessages" class="chat-messages"></div>
+      </div>
+      <div id="statusLine" class="status-line" aria-live="polite">Ready</div>
+    </div>
+
+    <aside id="stagingTrayPopover" class="popover tray-popover" aria-label="Staged screenshots">
+      <header><strong>Staged context</strong><span id="trayCount">0 images</span></header>
+      <div id="trayThumbs" class="tray-thumbs"></div>
+      <footer>
+        <button id="trayPopLastBtn" type="button" title="Remove last added (Ctrl+Shift+Q)">Pop Last</button>
+        <button id="trayClearBtn" type="button">Clear</button>
+        <button id="traySendAllBtn" class="accent" type="button">Send All <kbd>⌘⇧D</kbd></button>
+      </footer>
+    </aside>
+
+    <aside id="settingsPopover" class="popover settings-popover" aria-label="Settings">
+      <header><strong>Settings</strong><button id="settingsClose" type="button">×</button></header>
+      <label>Answer speed<select id="qualityModeOverlay"><option value="instant">Instant (minimum latency)</option><option value="fast">Fast (balanced stream)</option><option value="verified">Verified (slower)</option></select></label>
+      <label>Gemini model<select id="modelSelectOverlay" aria-label="Gemini model"></select></label>
+      <small>Flash-Lite is fastest. Model changes apply to the next answer.</small>
+      <label>Speech-to-text model<select id="sttModelSelect" aria-label="STT model"></select></label>
+      <small>Whisper model used for your voice. Small = fastest, Large V3 = most accurate.</small>
+      <label>Screenshot mode
+        <select id="screenshotModeOverlay">
+          <option value="normal">Normal — ultra-fast, full screen, highest quality</option>
+        </select>
+      </label>
+      <small>Single mode: full screen at full resolution, captured ultra fast.</small>
+      <div class="model-routing">
+        <h4>🧩 Model Routing — default → fallback (pick any model)</h4>
+        <label>Tier 1 (Simple) — default <select id="modelTier1Select"></select><span class="tier-extras" id="tier1Extras"></span></label>
+        <label>Tier 1 (Simple) — fallback <select id="modelTier1FbSelect"></select></label>
+        <label>Tier 2 (Moderate) — default <select id="modelTier2Select"></select><span class="tier-extras" id="tier2Extras"></span></label>
+        <label>Tier 2 (Moderate) — fallback <select id="modelTier2FbSelect"></select></label>
+        <label>Tier 3 (Hard) — default <select id="modelTier3Select"></select><span class="tier-extras" id="tier3Extras"></span></label>
+        <label>Tier 3 (Hard) — fallback <select id="modelTier3FbSelect"></select></label>
+        <label>Fast first-answer (Tier 3) <select id="fastAnswerModelSelect"></select></label>
+        <small>If any model fails, the next one in the chain answers instantly. Changes save immediately and apply to the next answer.</small>
+        <div class="model-refresh-row">
+          <button id="refreshGeminiModelsBtn" type="button">🔄 Update Gemini models list</button>
+          <span id="geminiCatalogMeta"></span>
+        </div>
+        <small>Gemini keeps releasing new models — refresh to see and keep the latest.</small>
+      </div>
+      <div class="settings-usage">
+        <div class="tracker-section"><h4>🎙️ STT Usage</h4><div id="sttTrackerSettings"></div></div>
+        <div class="tracker-section"><h4>🧠 LLM Usage</h4><div id="llmTrackerSettings"></div></div>
+      </div>
+      <label>Resume (paste content for context-sensitive answers)</label>
+      <textarea id="resumeInput" class="resume-input" rows="4" maxlength="8000" placeholder="Paste your resume / background info here… The AI will use it when answering questions."></textarea>
+      <small>The AI will see this as context alongside every question.</small>
+      <label>Opacity <span class="setting-shortcut">Ctrl+Shift+↑ / ↓</span><input id="opacityRange" type="range" min="0.35" max="1" step="0.05" value="1"></label>
+      <label>Privileges <span class="setting-shortcut" id="adminBadge">checking…</span></label>
+      <button id="elevateButton" type="button">Restart as Administrator</button>
+      <small id="adminNote">Checking current privilege level…</small>
+      <button id="resetWindowButton" type="button">Reset window</button>
+      <small>The app remains visible in Task Manager and can always be closed normally.</small>
+    </aside>
+
+    <aside id="usageTrackerPanel" class="popover usage-popover" aria-label="Usage trackers">
+      <header><strong>📊 Usage Trackers</strong><button id="usageClose" type="button">×</button></header>
+      <div class="tracker-section">
+        <h4>🎙️ STT Usage (Groq Whisper)</h4>
+        <div id="sttTrackerContent"></div>
+      </div>
+      <div class="tracker-section">
+        <h4>🧠 LLM Usage (3-tier router)</h4>
+        <div id="llmTrackerContent"></div>
+      </div>
+      <div class="tracker-meta"><span id="lastRoutingDecision">—</span></div>
+    </aside>
+
+    <aside id="shortcutsPopover" class="popover shortcuts-popover" aria-label="Shortcuts help">
+      <header><strong>All Shortcuts</strong><button id="shortcutsClose" type="button">×</button></header>
+      <div class="shortcuts-list">
+        <div><kbd>Ctrl+Shift+V</kbd> <span>Start/Stop Recording & Send</span></div>
+        <div><kbd>Ctrl+Shift+S</kbd> <span>Stage Screenshot (Hard)</span></div>
+        <div><kbd>Ctrl+Shift+D</kbd> <span>Send Staged Images</span></div>
+        <div><kbd>Ctrl+Shift+Q</kbd> <span>Pop Last Photo (recent first)</span></div>
+        <div><kbd>Ctrl+Shift+K</kbd> <span>Stop AI Response</span></div>
+        <div><kbd>Ctrl+Shift+L</kbd> <span>Show/Hide This Help (Unique)</span></div>
+        <div><kbd>Ctrl+Shift+O</kbd> <span>Close Response Overlay (X beside Clear)</span></div>
+        <div><kbd>Ctrl+Shift+X</kbd> <span>Toggle Click-Through</span></div>
+        <div><kbd>Ctrl+Shift+H</kbd> <span>Show/Hide Overlay (fallback: Ctrl+Alt+H)</span></div>
+        <div><kbd>Ctrl+Shift+R</kbd> <span>Reset Window</span></div>
+        <div><kbd>Ctrl+Shift+↑/↓</kbd> <span>Opacity Up/Down</span></div>
+        <div><kbd>Ctrl+Shift+W</kbd> <span>Immediate Quit</span></div>
+        <div><kbd>Ctrl+Left/Right</kbd> <span>Scroll wide code</span></div>
+        <div><kbd>Ctrl+Up/Down</kbd> <span>Scroll answer</span></div>
+      </div>
+      <footer>
+        <small>Hover circular ? button also shows this. Shortcut L is unique, no command conflict.</small>
+      </footer>
+    </aside>
+  </section>
+
+  <script src="mic-capture.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

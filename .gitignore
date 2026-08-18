@@ -1,0 +1,9 @@
+node_modules/
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+
+# Keep only final Windows deliverables, not temporary unpacked output.
+release/*
+!release/*.exe
