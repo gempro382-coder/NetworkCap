@@ -34,7 +34,8 @@
     terminalInput: $('terminalInput'), terminalPrompt: $('terminalPrompt'), terminalState: $('terminalState'),
     terminalMeta: $('terminalMeta'), terminalKill: $('terminalKillBtn'), terminalClear: $('terminalClearBtn'), terminalClose: $('terminalCloseBtn'),
     adminBadge: $('adminBadge'), elevate: $('elevateButton'), adminNote: $('adminNote'),
-    shortcutsPopover: $('shortcutsPopover'), shortcutsClose: $('shortcutsClose')
+    shortcutsPopover: $('shortcutsPopover'), shortcutsClose: $('shortcutsClose'),
+    shortcutsList: $('shortcutsList'), shortcutsPinBadge: $('shortcutsPinBadge')
   };
 
   let currentAssistant = null;
@@ -55,6 +56,11 @@
   let healAttempted = false;
   let terminalHistoryIndex = -1;
   let llmModelBadge = null;
+  // Shortcuts help: "pinned" means the panel stays open through popover
+  // toggles, outside clicks and overlay hide/show — only the × button,
+  // Ctrl+Shift+/ or clicking ? again closes it.
+  let shortcutsPinned = false;
+  let shortcutsLoaded = false;
 
       function escapeHtml(value) {
     return String(value || '')
@@ -176,7 +182,13 @@
           : el.usageTrackerPanel.classList.contains('open')
             ? Math.min(360, el.usageTrackerPanel.scrollHeight) + 46
             : 0;
-      api.resizeOverlay(Math.min(760, Math.max(contentHeight, openPopover || 36)));
+      // The shortcuts help panel is measured separately: it may be pinned open
+      // alongside another popover, and the window must be tall enough to show
+      // EVERY row of it — otherwise the list gets clipped by the overlay edge.
+      const helpPopover = el.shortcutsPopover && el.shortcutsPopover.classList.contains('open')
+        ? Math.min(430, el.shortcutsPopover.scrollHeight) + 46
+        : 0;
+      api.resizeOverlay(Math.min(760, Math.max(contentHeight, openPopover, helpPopover, 36)));
     });
   }
 
@@ -800,27 +812,96 @@
     });
   }
 
-  function showShortcutsHelp() {
-    el.settingsPopover.classList.remove('open');
-    el.tray.classList.remove('open');
-    el.usageTrackerPanel.classList.remove('open');
+  // -------------------------------------------------------------------------
+  // Shortcuts help panel
+  //   hover ?            → transient peek (closes on mouse-out)
+  //   click ? / Ctrl+Shift+L → PIN open (survives other popovers, outside
+  //                            clicks, Esc and overlay hide/show)
+  //   Ctrl+Shift+/ (or ?) / × button → close + unpin
+  // -------------------------------------------------------------------------
+  async function loadShortcutsList(force = false) {
+    if (shortcutsLoaded && !force) return;
+    if (!el.shortcutsList || !api.getShortcuts) return;
+    let list = [];
+    try { list = await api.getShortcuts(); } catch (_) { list = []; }
+    if (!Array.isArray(list) || !list.length) return;
+    el.shortcutsList.replaceChildren();
+    for (const item of list) {
+      const row = document.createElement('div');
+      if (item.registered === false) row.classList.add('shortcut-dead');
+      const key = document.createElement('kbd');
+      key.textContent = item.accel;
+      const label = document.createElement('span');
+      label.textContent = item.registered === false ? `${item.label} — hotkey taken by another app` : item.label;
+      row.append(key, label);
+      el.shortcutsList.appendChild(row);
+    }
+    shortcutsLoaded = true;
+  }
+
+  function syncShortcutsPinUi() {
+    el.shortcutsPopover.classList.toggle('pinned', shortcutsPinned);
+    if (el.shortcutsPinBadge) el.shortcutsPinBadge.classList.toggle('show', shortcutsPinned);
+    if (el.helpCircle) {
+      el.helpCircle.classList.toggle('active', shortcutsPinned);
+      el.helpCircle.setAttribute('aria-pressed', String(shortcutsPinned));
+    }
+  }
+
+  function showShortcutsHelp({ pin = false } = {}) {
+    if (pin) shortcutsPinned = true;
+    // A pinned help panel coexists with the other popovers; a transient peek
+    // still takes over the corner so nothing overlaps.
+    if (!shortcutsPinned) {
+      el.settingsPopover.classList.remove('open');
+      el.tray.classList.remove('open');
+      el.usageTrackerPanel.classList.remove('open');
+    }
     el.shortcutsPopover.classList.add('open');
+    syncShortcutsPinUi();
+    loadShortcutsList().then(() => requestResize()).catch(() => {});
     requestResize();
   }
-  function hideShortcutsHelp() {
+
+  function hideShortcutsHelp({ force = false } = {}) {
+    // Transient peeks close freely; a pinned panel only closes on an explicit
+    // close action (× button, Ctrl+Shift+/, or clicking ? again).
+    if (shortcutsPinned && !force) return;
+    shortcutsPinned = false;
     el.shortcutsPopover.classList.remove('open');
+    syncShortcutsPinUi();
     requestResize();
   }
+
+  function toggleShortcutsHelp() {
+    if (shortcutsPinned) hideShortcutsHelp({ force: true });
+    else showShortcutsHelp({ pin: true });
+  }
+
+  // Small grace period so the pointer can travel from the ? button into the
+  // panel without the transient peek collapsing mid-way.
+  let peekCloseTimer = 0;
+  const cancelPeekClose = () => { if (peekCloseTimer) { clearTimeout(peekCloseTimer); peekCloseTimer = 0; } };
+  const schedulePeekClose = () => {
+    cancelPeekClose();
+    if (shortcutsPinned) return;
+    peekCloseTimer = setTimeout(() => { peekCloseTimer = 0; hideShortcutsHelp(); }, 260);
+  };
+
   if (el.helpCircle) {
-    el.helpCircle.addEventListener('click', () => {
-      if (el.shortcutsPopover.classList.contains('open')) hideShortcutsHelp();
-      else showShortcutsHelp();
-    });
-    el.helpCircle.addEventListener('mouseenter', () => { showShortcutsHelp(); });
+    el.helpCircle.addEventListener('click', () => { cancelPeekClose(); toggleShortcutsHelp(); });
+    el.helpCircle.addEventListener('mouseenter', () => { cancelPeekClose(); showShortcutsHelp(); });
+    el.helpCircle.addEventListener('mouseleave', schedulePeekClose);
+  }
+  if (el.shortcutsPopover) {
+    el.shortcutsPopover.addEventListener('mouseenter', cancelPeekClose);
+    // Leaving the panel itself ends a transient peek — a pinned panel stays.
+    el.shortcutsPopover.addEventListener('mouseleave', schedulePeekClose);
   }
   if (el.shortcutsClose) {
-    el.shortcutsClose.addEventListener('click', hideShortcutsHelp);
+    el.shortcutsClose.addEventListener('click', () => hideShortcutsHelp({ force: true }));
   }
+  loadShortcutsList().catch(() => {});
 
   if (el.screenshotModeBoot) {
     el.screenshotModeBoot.addEventListener('change', async () => {
@@ -844,7 +925,13 @@
     const labels = { normal: 'Normal', hard: 'Hard', 'only-hard': 'Only Hard' };
     el.status.textContent = `Screenshot mode cycled to: ${labels[mode] || mode}`;
   });
-  api.onShowShortcuts(() => { showShortcutsHelp(); });
+  // Ctrl+Shift+L pins/unpins the help panel; Ctrl+Shift+/ (or ?) always closes it.
+  api.onShowShortcuts(() => { toggleShortcutsHelp(); });
+  if (api.onCloseShortcuts) api.onCloseShortcuts(() => { hideShortcutsHelp({ force: true }); });
+  // Overlay hidden then re-shown (Ctrl+Shift+H): a pinned help panel comes back.
+  api.onShowOverlay(() => {
+    if (shortcutsPinned) { el.shortcutsPopover.classList.add('open'); syncShortcutsPinUi(); requestResize(); }
+  });
 
   function renderTray(state) {
     el.badge.textContent = state.count;
@@ -871,7 +958,7 @@
 
   el.settings.addEventListener('click', () => {
     el.tray.classList.remove('open');
-    el.shortcutsPopover.classList.remove('open');
+    if (!shortcutsPinned) el.shortcutsPopover.classList.remove('open');
     el.usageTrackerPanel.classList.remove('open');
     el.settingsPopover.classList.toggle('open');
     requestResize();
@@ -950,7 +1037,7 @@
   if (el.usageButton) {
     el.usageButton.addEventListener('click', () => {
       el.settingsPopover.classList.remove('open');
-      el.shortcutsPopover.classList.remove('open');
+      if (!shortcutsPinned) el.shortcutsPopover.classList.remove('open');
       el.tray.classList.remove('open');
       el.usageTrackerPanel.classList.toggle('open');
       requestResize();
@@ -1056,18 +1143,26 @@
     if (el.usageTrackerPanel.classList.contains('open') && !el.usageTrackerPanel.contains(event.target) && !el.usageButton.contains(event.target)) {
       el.usageTrackerPanel.classList.remove('open'); changed = true;
     }
-    if (el.shortcutsPopover.classList.contains('open') && !el.shortcutsPopover.contains(event.target) && !el.helpCircle.contains(event.target) && !el.settings.contains(event.target)) {
+    if (!shortcutsPinned && el.shortcutsPopover.classList.contains('open') && !el.shortcutsPopover.contains(event.target) && !el.helpCircle.contains(event.target) && !el.settings.contains(event.target)) {
       el.shortcutsPopover.classList.remove('open'); changed = true;
     }
     if (changed) requestResize();
   });
   window.addEventListener('keydown', (event) => {
+    // Ctrl/Cmd+Shift+/ (or ?) — dedicated "close the shortcuts help" key.
+    // Handled here too so it works even if the global accelerator is taken.
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === '/' || event.key === '?')) {
+      event.preventDefault();
+      hideShortcutsHelp({ force: true });
+      return;
+    }
     if (event.key !== 'Escape') return;
-    const changed = el.tray.classList.contains('open') || el.settingsPopover.classList.contains('open') || el.usageTrackerPanel.classList.contains('open') || el.shortcutsPopover.classList.contains('open');
+    const changed = el.tray.classList.contains('open') || el.settingsPopover.classList.contains('open') || el.usageTrackerPanel.classList.contains('open') || (!shortcutsPinned && el.shortcutsPopover.classList.contains('open'));
     el.tray.classList.remove('open');
     el.settingsPopover.classList.remove('open');
     el.usageTrackerPanel.classList.remove('open');
-    el.shortcutsPopover.classList.remove('open');
+    // Esc never kills a PINNED help panel — that is what Ctrl+Shift+/ is for.
+    if (!shortcutsPinned) el.shortcutsPopover.classList.remove('open');
     if (changed) requestResize();
   });
 
@@ -1142,6 +1237,23 @@
   api.onLlmChunk((chunk) => {
     if (!currentAssistant) currentAssistant = addMessage('assistant', '');
     if (chunk && chunk.done) {
+      // Blank answer = failure. Without this the bubble stayed empty and was
+      // labelled "Complete", which is what "the AI is not responding" looked
+      // like from the outside.
+      if (currentAssistant && !String(currentRaw || '').trim() && !chunk.upgradePending) {
+        currentAssistant.classList.remove('streaming', 'upgrading');
+        messageBody(currentAssistant).innerHTML =
+          '<div class="response-error"><strong>No answer returned</strong>'
+          + `<span>${escapeHtml(chunk.model || llmModelBadge || 'The model')} sent an empty response. Press Send again, or pick a different model for this tier in Settings.</span></div>`;
+        const failMeta = currentAssistant.querySelector('.message-meta');
+        if (failMeta) failMeta.textContent = 'Empty response';
+        currentAssistant = null;
+        upgradeTarget = null;
+        el.answerState.textContent = 'Empty response';
+        el.status.textContent = 'Model returned no text — try again.';
+        scrollToBottom();
+        return;
+      }
       if (currentAssistant) {
         currentAssistant.dataset.raw = currentRaw;
         messageBody(currentAssistant).innerHTML = renderMarkdown(currentRaw);

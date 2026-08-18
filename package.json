@@ -20,13 +20,14 @@
   },
   "scripts": {
     "start": "electron .",
-    "test": "node tests/functional.test.js",
+    "test": "node tests/answer-style.test.js && node tests/visibility-state.test.js && node tests/llm-empty-response.test.js && node tests/shortcuts-help.test.js",
     "build:win": "node bin/build-win.js",
     "dist:win": "node bin/build-win.js --publish never",
     "test:load": "node tests/module_load.test.js"
   },
   "devDependencies": {
     "electron": "43.3.0",
+    "jsdom": "^29.1.1",
     "electron-builder": "26.15.3"
   },
   "build": {

@@ -236,15 +236,43 @@ kbd { font: inherit; opacity: .7; }
 }
 
 .shortcuts-popover {
-  width: 320px;
+  width: 340px;
   right: 34px;
   top: 39px;
 }
+.shortcuts-popover.pinned {
+  border-color: #4c8dff;
+  box-shadow: 0 18px 44px rgba(0,0,0,.5), 0 0 0 1px rgba(76,141,255,.35);
+}
+.shortcuts-popover header { display: flex; align-items: center; gap: 6px; }
+.shortcuts-popover .pin-badge {
+  display: none;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(76,141,255,.16);
+  border: 1px solid rgba(76,141,255,.45);
+  color: #9cc2ff;
+  font-size: 8px;
+  letter-spacing: .3px;
+}
+.shortcuts-popover .pin-badge.show { display: inline-block; }
 .shortcuts-popover .shortcuts-list {
   display: grid;
   gap: 6px;
-  max-height: 220px;
+  max-height: 320px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #3b4350 transparent;
+}
+.shortcuts-popover .shortcuts-list div.shortcut-dead {
+  opacity: .55;
+  border-left: 2px solid #a62636;
+}
+.help-circle.active {
+  background: rgba(76,141,255,.18) !important;
+  border-color: #4c8dff !important;
+  color: #9cc2ff !important;
 }
 .shortcuts-popover .shortcuts-list div {
   display: flex;

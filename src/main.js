@@ -22,6 +22,8 @@ const {
   OVERLAY_SIZE,
   BOOT_SIZE,
   SHORTCUTS,
+  RENDERER_ONLY_SHORTCUTS,
+  prettyAccel,
   GEMINI_PRIMARY_MODEL,
   SCREENSHOT_MODES,
   GROQ_MODELS,
@@ -161,12 +163,29 @@ function createWindow() {
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
     if (!input.control && !input.meta) return;
-    if (String(input.key || '').toLowerCase() !== 'h') return;
-    const isPrimaryToggle = input.shift && !input.alt;
-    const isAltToggle = input.alt && !input.shift;
-    if (isPrimaryToggle || isAltToggle) {
+    const key = String(input.key || '').toLowerCase();
+
+    // Show/Hide Overlay fallback.
+    if (key === 'h') {
+      const isPrimaryToggle = input.shift && !input.alt;
+      const isAltToggle = input.alt && !input.shift;
+      if (isPrimaryToggle || isAltToggle) {
+        event.preventDefault();
+        toggleVisibility();
+      }
+      return;
+    }
+
+    // Shortcuts-help fallbacks. Ctrl+Shift+/ ('?' on most layouts) closes the
+    // help panel and Ctrl+Shift+L toggles/pins it, even when the global
+    // accelerator could not be registered (OS/other app owns it).
+    if (!input.shift) return;
+    if (key === '/' || key === '?') {
       event.preventDefault();
-      toggleVisibility();
+      send('close-shortcuts', true);
+    } else if (key === 'l') {
+      event.preventDefault();
+      send('show-shortcuts', true);
     }
   });
 
@@ -528,6 +547,14 @@ async function runRouterStream({ query, images = [], forceTier = null, skill } =
       onFallback: (f) => { currentLlmModel = f.toModel; send('llm:fallback', f); },
       onChunk: (text) => send('llm:chunk', { text, done: false, model: currentLlmModel })
     });
+    // Final guard: if every model somehow produced nothing, surface it as an
+    // error instead of closing the stream on an empty bubble.
+    if (!String(res.text || '').trim() && !res.upgradePending) {
+      const reason = `${res.model || 'The model'} returned an empty answer. Try again or switch the tier model in Settings.`;
+      log.error(`Router returned empty text (model=${res.model}, tier=${res.tier})`);
+      send('llm:error', { error: reason });
+      return { ok: false, reason };
+    }
     send('llm:chunk', { text: '', done: true, model: res.model, upgradePending: Boolean(res.upgradePending), requestId });
     send('llm:tracker-update', {
       snapshot: llmRouter.tracker.getSnapshot(),
@@ -574,8 +601,8 @@ async function stageCurrentScreen() {
 // ---------------------------------------------------------------------------
 // Shortcuts
 // ---------------------------------------------------------------------------
-function registerShortcuts() {
-  const bindings = [
+function shortcutBindings() {
+  return [
     [SHORTCUTS.toggleRecording, 'Start/Stop Recording & Send', () => toggleRecordingAndSend()],
     [SHORTCUTS.stageImage, 'Stage Image', () => stageCurrentScreen()],
     [SHORTCUTS.sendStaged, 'Send Staged Images', () => {
@@ -605,9 +632,41 @@ function registerShortcuts() {
       }
     }],
     [SHORTCUTS.stopAI, 'Stop AI Response', () => stopAiResponse()],
-    [SHORTCUTS.showShortcuts, 'Show All Shortcuts Help', () => send('show-shortcuts', true)],
+    [SHORTCUTS.showShortcuts, 'Show/Pin All Shortcuts Help', () => send('show-shortcuts', true)],
+    [SHORTCUTS.closeShortcuts, 'Close Shortcuts Help', () => send('close-shortcuts', true)],
+    [SHORTCUTS.closeShortcutsAlt, 'Close Shortcuts Help (alt)', () => send('close-shortcuts', true)],
     [SHORTCUTS.closeResponse, 'Close Response Overlay', () => send('close-response-overlay', true)]
   ];
+}
+
+/** Flat, display-ready shortcut list for the in-app help panel. */
+function shortcutHelpList() {
+  // Accelerators that are registered but shown merged into another row.
+  const hidden = new Set([SHORTCUTS.closeShortcutsAlt]);
+  const displayOverride = {
+    [SHORTCUTS.closeShortcuts]: 'Ctrl+Shift+/  (or ?)'
+  };
+  const seen = new Set();
+  const list = [];
+  for (const [accel, label] of shortcutBindings()) {
+    if (hidden.has(accel)) continue;
+    const pretty = displayOverride[accel] || prettyAccel(accel);
+    if (seen.has(pretty)) continue;
+    seen.add(pretty);
+    list.push({ accel: pretty, label, registered: isAcceleratorLive(accel) });
+  }
+  for (const extra of RENDERER_ONLY_SHORTCUTS) {
+    list.push({ accel: extra.accel, label: extra.label, registered: true });
+  }
+  return list;
+}
+
+function isAcceleratorLive(accel) {
+  try { return globalShortcut.isRegistered(accel); } catch (_) { return false; }
+}
+
+function registerShortcuts() {
+  const bindings = shortcutBindings();
   // Register each accelerator; verify it actually took. globalShortcut silently
   // fails when the OS or another app already owns the combo, so re-try a few
   // times (AV/IME tools sometimes grab hotkeys briefly at startup) and warn.
@@ -899,6 +958,10 @@ function registerIpc() {
     try { terminalProc.kill(); return { ok: true }; } catch (error) { return { ok: false, reason: error.message }; }
   });
   ipcMain.handle('terminal-status', () => ({ running: Boolean(terminalProc), cwd: terminalCwd }));
+
+  // Live shortcut map for the "All Shortcuts" help panel — always in sync with
+  // what is actually registered, so the panel can never drift from reality.
+  ipcMain.handle('get-shortcuts', () => shortcutHelpList());
 
   ipcMain.handle('toggle-click-through', () => setClickThrough(!clickThrough));
   ipcMain.handle('toggle-visibility', () => (toggleVisibility(), overlayVisible));

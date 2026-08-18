@@ -65,6 +65,9 @@ contextBridge.exposeInMainWorld('aashi', {
   terminalKill: () => ipcRenderer.invoke('terminal-kill'),
   terminalStatus: () => ipcRenderer.invoke('terminal-status'),
 
+  // ---- shortcuts help ----
+  getShortcuts: () => ipcRenderer.invoke('get-shortcuts'),
+
   // ---- events ----
   onBootLog: on('boot-log'),
   onBootProgress: on('boot-progress'),
@@ -84,6 +87,7 @@ contextBridge.exposeInMainWorld('aashi', {
   onTerminalToggle: on('terminal-toggle'),
   onScreenshotModeChanged: on('screenshot-mode-changed'),
   onShowShortcuts: on('show-shortcuts'),
+  onCloseShortcuts: on('close-shortcuts'),
   onCloseResponseOverlay: on('close-response-overlay'),
 
   // ---- STT (Groq Whisper) ----

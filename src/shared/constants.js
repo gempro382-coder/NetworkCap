@@ -38,8 +38,32 @@ const SHORTCUTS = Object.freeze({
   stopAI: 'CommandOrControl+Shift+K',
   cycleScreenshotMode: 'CommandOrControl+Shift+M',
   showShortcuts: 'CommandOrControl+Shift+L',
+  // Dedicated "close the shortcuts help" hotkey. Shift+/ is '?' on most
+  // layouts, so both accelerators are registered and both close the panel.
+  closeShortcuts: 'CommandOrControl+Shift+/',
+  closeShortcutsAlt: 'CommandOrControl+Shift+?',
   closeResponse: 'CommandOrControl+Shift+O'
 });
+
+// UI-only key handling that lives in the renderer (no global accelerator) but
+// must still be listed in the "All Shortcuts" help panel.
+const RENDERER_ONLY_SHORTCUTS = Object.freeze([
+  { accel: 'Ctrl+Left / Right', label: 'Scroll wide code / tables' },
+  { accel: 'Ctrl+Up / Down', label: 'Scroll the answer' },
+  { accel: 'Enter / Shift+Enter', label: 'Send question / newline (Ask box)' },
+  { accel: 'Esc', label: 'Close popovers (pinned help panel stays)' }
+]);
+
+/** Pretty-print an Electron accelerator for display in the help panel. */
+function prettyAccel(accel, platform = process.platform) {
+  return String(accel)
+    .replace(/CommandOrControl/gi, platform === 'darwin' ? 'Cmd' : 'Ctrl')
+    .replace(/\bControl\b/gi, 'Ctrl')
+    .replace(/\bUp\b/g, '↑')
+    .replace(/\bDown\b/g, '↓')
+    .replace(/\bLeft\b/g, '←')
+    .replace(/\bRight\b/g, '→');
+}
 
 // ---------------------------------------------------------------------------
 // Gemini (Google AI Studio) — used for Tier 3 (hard) and Tier 1 fallback.
@@ -105,10 +129,15 @@ const STT_MODEL_OPTIONS = Object.freeze([
 // primary -> fallback -> extraFallbacks — if a model fails (rate limit, HTTP
 // error, timeout, invalid key), the router instantly moves to the next model.
 const LLM_TIERS = Object.freeze({
+  // NOTE on maxOutput: Groq reasoning models (gpt-oss, qwen) spend part of this
+  // budget on hidden thinking BEFORE emitting visible text. A 256-token cap
+  // made Tier 1 return empty answers for simple questions, so the floor is
+  // 1024 here and re-asserted in groq-llm.service.js. The answer-style prompt
+  // is what keeps replies short — not the token cap.
   simple: {
     label: 'Tier 1 — Simple',
-    primary: { id: 'openai/gpt-oss-20b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000, maxOutput: 256 },
-    fallback: { id: 'gemini-3.1-flash-lite', rpm: null, rpd: null, tpm: null, tpd: null, maxOutput: 256 },
+    primary: { id: 'openai/gpt-oss-20b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000, maxOutput: 1024 },
+    fallback: { id: 'gemini-3.1-flash-lite', rpm: null, rpd: null, tpm: null, tpd: null, maxOutput: 1024 },
     extraFallbacks: []
   },
   moderate: {
@@ -158,6 +187,8 @@ module.exports = {
   BOOT_SIZE,
   OVERLAY_SIZE,
   SHORTCUTS,
+  RENDERER_ONLY_SHORTCUTS,
+  prettyAccel,
   SCREENSHOT_MODES,
   FAST_ANSWER_MODEL,
   GROQ_MODELS,

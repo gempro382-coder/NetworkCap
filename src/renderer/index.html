@@ -123,7 +123,7 @@
       <button id="stageButton" class="command-button" type="button" title="Stage screenshot (Ctrl+Shift+S)">▧<b id="stagedBadge">0</b></button>
       <button id="sendStagedButton" class="command-button" type="button" title="Send staged screenshots">↗</button>
       <button id="stopAIButton" class="command-button stop" type="button" title="Stop AI (Ctrl+Shift+K)">■</button>
-      <button id="shortcutsHelpButton" class="command-button help-circle" type="button" title="Shortcuts (Ctrl+Shift+L) — Hover to show all">?</button>
+      <button id="shortcutsHelpButton" class="command-button help-circle" type="button" title="Shortcuts — hover to peek · click or Ctrl+Shift+L to pin open · Ctrl+Shift+/ to close" aria-pressed="false">?</button>
       <button id="settingsButton" class="command-button" type="button" title="Settings">⚙</button>
       <button id="usageButton" class="command-button" type="button" title="Usage trackers">📊</button>
       <button id="closeButton" class="command-button close" type="button" title="Quit NetworkCap">×</button>
@@ -241,25 +241,16 @@
     </aside>
 
     <aside id="shortcutsPopover" class="popover shortcuts-popover" aria-label="Shortcuts help">
-      <header><strong>All Shortcuts</strong><button id="shortcutsClose" type="button">×</button></header>
-      <div class="shortcuts-list">
-        <div><kbd>Ctrl+Shift+V</kbd> <span>Start/Stop Recording & Send</span></div>
-        <div><kbd>Ctrl+Shift+S</kbd> <span>Stage Screenshot (Hard)</span></div>
-        <div><kbd>Ctrl+Shift+D</kbd> <span>Send Staged Images</span></div>
-        <div><kbd>Ctrl+Shift+Q</kbd> <span>Pop Last Photo (recent first)</span></div>
-        <div><kbd>Ctrl+Shift+K</kbd> <span>Stop AI Response</span></div>
-        <div><kbd>Ctrl+Shift+L</kbd> <span>Show/Hide This Help (Unique)</span></div>
-        <div><kbd>Ctrl+Shift+O</kbd> <span>Close Response Overlay (X beside Clear)</span></div>
-        <div><kbd>Ctrl+Shift+X</kbd> <span>Toggle Click-Through</span></div>
-        <div><kbd>Ctrl+Shift+H</kbd> <span>Show/Hide Overlay (fallback: Ctrl+Alt+H)</span></div>
-        <div><kbd>Ctrl+Shift+R</kbd> <span>Reset Window</span></div>
-        <div><kbd>Ctrl+Shift+↑/↓</kbd> <span>Opacity Up/Down</span></div>
-        <div><kbd>Ctrl+Shift+W</kbd> <span>Immediate Quit</span></div>
-        <div><kbd>Ctrl+Left/Right</kbd> <span>Scroll wide code</span></div>
-        <div><kbd>Ctrl+Up/Down</kbd> <span>Scroll answer</span></div>
+      <header>
+        <strong>All Shortcuts</strong>
+        <span id="shortcutsPinBadge" class="pin-badge" title="Pinned — stays open until Ctrl+Shift+/">📌 pinned</span>
+        <button id="shortcutsClose" type="button" title="Close (Ctrl+Shift+/)">×</button>
+      </header>
+      <div class="shortcuts-list" id="shortcutsList">
+        <div><kbd>Ctrl+Shift+L</kbd> <span>Loading shortcuts…</span></div>
       </div>
       <footer>
-        <small>Hover circular ? button also shows this. Shortcut L is unique, no command conflict.</small>
+        <small><b>Ctrl+Shift+L</b> pins this panel open (stays visible while you work) · <b>Ctrl+Shift+/</b> closes it · hover the <b>?</b> button for a quick peek.</small>
       </footer>
     </aside>
   </section>

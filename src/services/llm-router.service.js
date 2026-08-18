@@ -19,7 +19,8 @@ const { EventEmitter } = require('events');
 const { LLM_TIERS, FAST_ANSWER_MODEL } = require('../shared/constants');
 const { RateTracker } = require('./rate-tracker');
 const { groqChat, cancelActive } = require('./groq-llm.service');
-const { geminiService, ACCURACY_POLICY } = require('./gemini.service');
+const { geminiService } = require('./gemini.service');
+const { buildSystemPrompt } = require('../shared/answer-style');
 const { config } = require('../core/config-store');
 const { createLogger } = require('../shared/logger');
 
@@ -91,6 +92,13 @@ Rules:
 
 Respond with ONLY the single word.`;
 
+/** Pull "simple" | "moderate" | "hard" out of a chatty classifier reply. */
+function parseTierLabel(raw) {
+  const text = String(raw || '').toLowerCase();
+  const hit = text.match(/\b(simple|moderate|hard)\b/g);
+  return hit ? hit[hit.length - 1] : '';
+}
+
 class LlmRouter extends EventEmitter {
   constructor() {
     super();
@@ -128,14 +136,18 @@ class LlmRouter extends EventEmitter {
 
     let label = '';
     try {
+      // CLASSIFIER_MODEL is a reasoning model: a 5-token cap guaranteed an
+      // empty completion (all of it spent thinking), so this call ALWAYS
+      // silently fell through to the default tier. Give it real headroom and
+      // read the label out of whatever it returns.
       const res = await groqChat({
         model: CLASSIFIER_MODEL,
         messages: [{ role: 'user', content: query }],
         system: CLASSIFIER_SYSTEM,
-        maxTokens: 5,
+        maxTokens: 512,
         temperature: 0
       });
-      label = (res.text || '').trim().toLowerCase();
+      label = parseTierLabel(res.text);
     } catch (error) {
       // Fallback to ultra fast gemini
       try {
@@ -146,7 +158,7 @@ class LlmRouter extends EventEmitter {
           maxTokens: 5,
           temperature: 0
         });
-        label = (res.text || '').trim().toLowerCase();
+        label = parseTierLabel(res.text);
       } catch (_) {
         label = 'moderate';
       }
@@ -232,29 +244,33 @@ class LlmRouter extends EventEmitter {
     this.emit('routed', { tier: route.tier, method: route.method, reason: route.reason, model: primaryId, requestId });
     this._emitTracker();
 
-    const result = await this._callTier(tierKey, { query, images, onChunk, onModel, onFallback, maxTokens, requestId });
+    const result = await this._callTier(tierKey, { query, images, skill, onChunk, onModel, onFallback, maxTokens, requestId });
     return { ...result, tier: route.tier, method: route.method, reason: route.reason, requestId };
   }
 
-  async _callTier(tierKey, { query, images, onChunk, onModel, onFallback, maxTokens, requestId = '' }) {
+  async _callTier(tierKey, { query, images, skill = 'general', onChunk, onModel, onFallback, maxTokens, requestId = '' }) {
     // Tier 3 (Hard): answer instantly with a fast partner chain (Groq → fast
     // Gemini), then the Tier-3 chain replaces it once a (better) answer lands.
     // Images go through the same fast path — gpt-oss and flash-lite are multimodal.
     if (tierKey === 'hard') {
-      return this._callTierHardFast({ query, images, onChunk, onModel, onFallback, maxTokens, requestId });
+      return this._callTierHardFast({ query, images, skill, onChunk, onModel, onFallback, maxTokens, requestId });
     }
-    return this._callTierChain(tierKey, { query, images, onChunk, onModel, onFallback, maxTokens });
+    return this._callTierChain(tierKey, { query, images, skill, onChunk, onModel, onFallback, maxTokens });
   }
 
   // Stream a tier's whole chain (primary → fallback → extras) with instant
   // failover on ANY failure. Used for Tier 1/2 and as the final fallback.
-  async _callTierChain(tierKey, { query, images, onChunk, onModel, onFallback, maxTokens }) {
+  async _callTierChain(tierKey, { query, images, skill = 'general', onChunk, onModel, onFallback, maxTokens }) {
     const chain = this._modelChain(tierKey);
     let lastError = null;
     for (let i = 0; i < chain.length; i++) {
       const modelId = chain[i];
       try {
-        return await this._invoke(modelId, query, images, onChunk, onModel, this._maxTokensFor(tierKey, modelId) || maxTokens);
+        return await this._invoke(
+          modelId, query, images, onChunk, onModel,
+          this._maxTokensFor(tierKey, modelId) || maxTokens, skill,
+          { compact: tierKey === 'simple' }
+        );
       } catch (err) {
         if (isAbortError(err)) throw err; // user pressed Stop — no failover
         lastError = err;
@@ -279,7 +295,7 @@ class LlmRouter extends EventEmitter {
    * replaces the fast answer in place. If every fast partner fails, the Tier-3
    * answer is streamed live so the user always sees progress.
    */
-  async _callTierHardFast({ query, images = [], onChunk, onModel, onFallback, maxTokens, requestId = '' }) {
+  async _callTierHardFast({ query, images = [], skill = 'general', onChunk, onModel, onFallback, maxTokens, requestId = '' }) {
     const rid = requestId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const upgradeChain = this._modelChain('hard');
     const fastCandidates = [this._fastAnswerModel(), FAST_GEMINI_FALLBACK]
@@ -289,7 +305,7 @@ class LlmRouter extends EventEmitter {
     // No distinct fast partner available (user picked Gemini models only) →
     // just stream the Tier-3 chain live like any other tier.
     if (!fastCandidates.length) {
-      return this._callTierChain('hard', { query, images, onChunk, onModel, onFallback, maxTokens });
+      return this._callTierChain('hard', { query, images, skill, onChunk, onModel, onFallback, maxTokens });
     }
 
     let fastFailed = false;
@@ -306,7 +322,7 @@ class LlmRouter extends EventEmitter {
             upgradeBuffer += delta;
             // If the fast chain died, keep the user's screen moving.
             if (fastFailed) onChunk(delta);
-          }, onModel, this._maxTokensFor('hard', modelId) || maxTokens);
+          }, onModel, this._maxTokensFor('hard', modelId) || maxTokens, skill, { compact: false });
           this.emit('upgraded', { text: res.text, model: res.model, requestId: rid });
           return res;
         } catch (err) {
@@ -334,7 +350,9 @@ class LlmRouter extends EventEmitter {
       const modelId = fastCandidates[i];
       this.emit('fast-start', { model: modelId, requestId: rid });
       try {
-        const fastRes = await this._invoke(modelId, query, images, onChunk, onModel, 512);
+        // 1024, not 512: the fast partner is a reasoning model too, and a tight
+        // cap makes it burn the budget thinking and stream nothing.
+        const fastRes = await this._invoke(modelId, query, images, onChunk, onModel, 1024, skill, { compact: true });
         // Fire-and-forget: the upgrade keeps running and emits 'upgraded' when done.
         upgradePromise.catch(() => {});
         return { ...fastRes, fast: true, upgradePending: true };
@@ -362,12 +380,28 @@ class LlmRouter extends EventEmitter {
     throw lastFastError || new Error('All models failed for this question.');
   }
 
-  async _invoke(modelId, query, images, onChunk, onModel, maxTokens = 1024) {
+  async _invoke(modelId, query, images, onChunk, onModel, maxTokens = 1024, skill = 'general', { compact = false } = {}) {
     const isGemini = modelId.startsWith('gemini-');
-    const resume = String(config.get('resume') || '').trim();
-    const systemPrompt = resume
-      ? `${ACCURACY_POLICY}\n\n---\nUser's resume / background (pasted by the user in NetworkCap Settings — treat it as ground truth about them):\n${resume}\n---\nYou HAVE this resume in your context. If the user asks "do you have my resume", "do you know me", or anything about themselves, confirm using their resume and answer from it. Always check the resume FIRST for questions about their skills, experience, projects, education, or background, and tailor answers accordingly.`
-      : ACCURACY_POLICY;
+    // One persona for every provider and every tier: the skill mode, the
+    // candidate voice / answer-shape contract, and the user's resume.
+    // Screenshot questions always get the vision delta on top.
+    const effectiveSkill = (Array.isArray(images) && images.length)
+      ? 'vision'
+      : (['interview', 'coding', 'general', 'vision'].includes(skill) ? skill : 'interview');
+    // Tier 1 and the Tier-3 fast partner run the compact contract: identical
+    // voice, ~4x fewer prompt tokens, so the Groq TPM budget and first-token
+    // latency stay healthy during a live interview. (Driven by an explicit
+    // flag — it used to be inferred from maxTokens, which silently stopped
+    // matching when the token floors were raised.)
+    const systemPrompt = buildSystemPrompt({
+      skill: effectiveSkill,
+      resume: config.get('resume'),
+      compact,
+      // Small models drift back to essay mode — restate the hard limits.
+      extra: compact
+        ? 'No preamble, no closing summary. Bold lead line, then at most 3 one-line bullets.'
+        : 'Hard limits for this reply: no preamble, no restating the question, no closing summary. Bold lead line, then at most 4 one-line bullets. Every bullet needs a name, a number, or a mechanism.'
+    });
     let text;
     if (isGemini) {
       const res = await geminiService.chat({
@@ -390,10 +424,22 @@ class LlmRouter extends EventEmitter {
       });
       text = res.text;
     }
+    // The request consumed quota even when it produced nothing — record it.
     const tokens = estimateTokens(text);
     this.tracker.recordUsage(modelId, { requests: 1, tokens });
-    if (onModel) onModel({ model: modelId });
     this._emitTracker();
+
+    // A blank answer is a FAILURE, not a result. Returning it here is what made
+    // the app look dead on simple questions ("what is Python?"): the renderer
+    // drew an empty bubble and marked it Complete. Throwing lets the tier chain
+    // fail over to the next model.
+    if (!String(text || '').trim()) {
+      const err = new Error(`${modelId} returned an empty response.`);
+      err.emptyCompletion = true;
+      throw err;
+    }
+
+    if (onModel) onModel({ model: modelId });
     return { text, model: modelId };
   }
 
@@ -410,4 +456,4 @@ class LlmRouter extends EventEmitter {
 }
 
 const llmRouter = new LlmRouter();
-module.exports = { LlmRouter, llmRouter, classifyFast, isRateLimit, isAbortError };
+module.exports = { LlmRouter, llmRouter, classifyFast, parseTierLabel, isRateLimit, isAbortError };

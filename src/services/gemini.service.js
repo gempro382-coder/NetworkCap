@@ -56,66 +56,23 @@ function normalizeImages(input) {
   });
 }
 
-const ACCURACY_POLICY = `
-You are NetworkCap, an accuracy-first AI assistant. Produce only the final answer; do not reveal hidden reasoning.
-
-Reliability rules:
-1. Answer the exact request and prioritize the evidence supplied by the user.
-2. Never invent missing requirements, APIs, quotations, test results, runtime behavior, or facts.
-3. If essential context is missing, state the smallest necessary assumption or ask one concise clarification.
-4. Internally check calculations, names, constraints, edge cases, and code consistency before answering.
-5. Distinguish verified facts from assumptions. If uncertain, say so plainly and explain how to verify.
-6. Do not claim that code was executed unless execution evidence is explicitly present.
-7. Prefer a correct, relevant answer over a long answer.
-
-Style rules (concise / to the point):
-8. BE CONCISE AND TO THE POINT. Lead with the direct answer. Avoid filler, preambles, greetings, or restating the question.
-9. Keep paragraphs short. Aim for the fewest words that fully solve the request — no big, sprawling answers when a short one does the job.
-10. When there are distinct key points, steps, pros/cons, or takeaways, present them as a Markdown bullet or numbered list with **bold highlights** on each point so the user can scan them quickly.
-11. Use clean Markdown with short headings only when they add clarity. Use fenced code blocks for code. Never wrap the whole response in a code fence.
-`.trim();
-
-const SKILL_PROMPTS = Object.freeze({
-  interview: `${ACCURACY_POLICY}
-
-Interview-answer mode:
-- Give a concise, natural answer a candidate can understand and adapt.
-- Start with the useful answer itself.
-- For “difference between”, use a clean comparison table and **When to choose which**.
-- Order: **Direct answer**, **Why**, **Example**, **Trade-offs**.
-- For behavioral, use STAR only when user supplied details; otherwise outline with placeholders.
-- Define terms precisely and include most important limitation or trade-off.`,
-
-  coding: `${ACCURACY_POLICY}
-
-Coding mode:
-- Identify inputs, outputs, constraints, edge cases before algorithm.
-- Present: **Approach**, **Correctness**, **Complexity**, **Implementation**, **Checks**.
-- Return complete, idiomatic code in requested language.
-- Validate indexing, null/empty, overflow, mutation, complexity.
-- If ambiguous, state assumption rather than fabricating signature.`,
-
-  vision: `${ACCURACY_POLICY}
-
-Image-analysis mode:
-- Treat all supplied images as one ordered context.
-- Identify actual task and transcribe only details required to solve it.
-- Mark unreadable/cropped content rather than guessing.
-- If images contain code, preserve identifiers exactly before diagnosing.
-- Provide directly usable solution and smallest useful verification checklist.`,
-
-  general: ACCURACY_POLICY
-});
+// Persona / accuracy / formatting contract shared by EVERY model and provider.
+// Single source of truth: src/shared/answer-style.js
+const {
+  ACCURACY_POLICY,
+  SKILL_PROMPTS,
+  buildSystemPrompt
+} = require('../shared/answer-style');
 
 function verificationPrompt(draft) {
   return `
-Quality-control pass. Review candidate answer against request and images.
-Correct factual, logical, coding, calculation, relevance, formatting problems. Remove unsupported claims.
-Return ONLY polished final answer in Markdown.
+Quality-control pass on the draft below. Fix factual, logical, coding, calculation, relevance and formatting errors. Delete unsupported claims.
+Keep the SAME voice and shape: bold one-line lead, few one-line bullets with bold tags, technical specifics, no filler, no preamble, no closing summary.
+Do not lengthen it — if anything, cut. Return ONLY the polished final answer in Markdown.
 
-<CANDIDATE_ANSWER>
+<DRAFT_ANSWER>
 ${String(draft || '').slice(0, 30000)}
-</CANDIDATE_ANSWER>`;
+</DRAFT_ANSWER>`;
 }
 
 class GeminiService {
@@ -226,7 +183,11 @@ class GeminiService {
     return /(?:\b408\b|\b409\b|\b429\b|\b500\b|\b502\b|\b503\b|\b504\b|quota|rate limit|timeout|timed out|aborted|aborterror|socket|network|fetch failed|temporar)/i.test(String(error?.message || error));
   }
 
-  _system(skill) { return SKILL_PROMPTS[skill] || SKILL_PROMPTS.general; }
+  _system(skill) {
+    // Persona + accuracy + formatting contract, with the user's resume folded
+    // in when they pasted one (Settings → Resume).
+    return buildSystemPrompt({ skill, resume: config.get('resume') });
+  }
 
   _historyContext() {
     if (!this.history.length) return '';
@@ -531,4 +492,4 @@ class GeminiService {
 }
 
 const geminiService = new GeminiService();
-module.exports = { GeminiService, geminiService, sanitizeTranscript, normalizeImages, extractResponseText, SKILL_PROMPTS, ACCURACY_POLICY, resolveRealModel };
+module.exports = { GeminiService, geminiService, sanitizeTranscript, normalizeImages, extractResponseText, SKILL_PROMPTS, ACCURACY_POLICY, buildSystemPrompt, resolveRealModel };
